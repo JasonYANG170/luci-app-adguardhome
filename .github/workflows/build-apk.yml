@@ -1,0 +1,126 @@
+name: Build APK for OpenWrt 25.10
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+env:
+  OPENWRT_VERSION: openwrt-25.10
+
+jobs:
+  build:
+    name: Build APK for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_generic
+          - arm_cortex-a7
+          - arm_cortex-a9
+          - arm_cortex-a15_neon-vfpv4
+          - x86_64
+          - i386_pentium4
+          - mips_24kc
+          - mipsel_24kc
+          - riscv64_riscv64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+            python3-distutils rsync unzip zlib1g-dev file wget
+
+      - name: Clone OpenWrt
+        run: |
+          git clone https://git.openwrt.org/openwrt/openwrt.git -b ${{ env.OPENWRT_VERSION }} openwrt
+          cd openwrt
+          echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
+
+      - name: Update Feeds
+        run: |
+          cd $OPENWRT_PATH
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Install Package
+        run: |
+          cd $OPENWRT_PATH
+          mkdir -p package/luci-app-adguardhome
+          cp -r $GITHUB_WORKSPACE/* package/luci-app-adguardhome/
+
+      - name: Configure Build
+        run: |
+          cd $OPENWRT_PATH
+          cat > .config <<EOF
+          CONFIG_TARGET_${{ matrix.arch }}=y
+          CONFIG_PACKAGE_luci-app-adguardhome=y
+          EOF
+          make defconfig
+
+      - name: Build Package
+        run: |
+          cd $OPENWRT_PATH
+          make package/luci-app-adguardhome/compile V=s -j$(nproc)
+
+      - name: Collect Packages
+        run: |
+          cd $OPENWRT_PATH
+          mkdir -p $GITHUB_WORKSPACE/packages_ci
+          find bin/packages/${{ matrix.arch }}/ -name "luci-app-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
+          find bin/packages/${{ matrix.arch }}/ -name "luci-i18n-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
+
+      - name: Create Archive
+        run: |
+          cd $GITHUB_WORKSPACE
+          tar -czf SNAPSHOT-${{ matrix.arch }}.tar.gz packages_ci/
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SNAPSHOT-${{ matrix.arch }}
+          path: SNAPSHOT-${{ matrix.arch }}.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare Release Files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
