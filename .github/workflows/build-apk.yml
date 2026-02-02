@@ -84,6 +84,11 @@ jobs:
           cd $OPENWRT_PATH
           make tools/install -j$(nproc)
 
+      - name: Build Package Index
+        run: |
+          cd $OPENWRT_PATH
+          make package/index
+
       - name: Build Package
         run: |
           cd $OPENWRT_PATH
