@@ -4,15 +4,10 @@ on:
   push:
     branches:
       - master
-    tags:
-      - 'v*'
   pull_request:
     branches:
       - master
   workflow_dispatch:
-
-env:
-  OPENWRT_VERSION: v25.12.0-rc1
 
 jobs:
   build:
@@ -23,94 +18,62 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          df -h
-
       - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
-            python3-setuptools rsync unzip zlib1g-dev file wget ccache
+          sudo apt-get install -y build-essential gettext git rsync
 
-      - name: Clone OpenWrt
+      - name: Create Package Structure
         run: |
-          git clone --depth=1 --single-branch --branch ${{ env.OPENWRT_VERSION }} \
-            https://github.com/openwrt/openwrt.git openwrt
-          cd openwrt
-          echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
-
-      - name: Update Feeds
-        run: |
-          cd $OPENWRT_PATH
-          # 使用 GitHub 镜像替代官方源
-          sed -i 's|git.openwrt.org/feed|github.com/openwrt|g' feeds.conf.default
-          sed -i 's|git.openwrt.org/project|github.com/openwrt|g' feeds.conf.default
+          mkdir -p apk-build/usr/lib/lua/luci
+          mkdir -p apk-build/etc
+          mkdir -p apk-build/usr/share
+          mkdir -p apk-build/www
           
-          # 更新 feeds，添加重试机制
-          for i in {1..3}; do
-            ./scripts/feeds update -a && break || sleep 10
-          done
+          # 复制文件
+          if [ -d "luasrc" ]; then
+            cp -r luasrc/* apk-build/usr/lib/lua/luci/
+          fi
           
-          ./scripts/feeds install -a
+          if [ -d "root/etc" ]; then
+            cp -r root/etc/* apk-build/etc/
+          fi
+          
+          if [ -d "root/usr/share" ]; then
+            cp -r root/usr/share/* apk-build/usr/share/
+          fi
+          
+          if [ -d "root/www" ]; then
+            cp -r root/www/* apk-build/www/
+          fi
 
-      - name: Install Package
+      - name: Create Package Info
         run: |
-          cd $OPENWRT_PATH
-          mkdir -p package/luci-app-adguardhome
-          # 只复制需要的文件，排除 openwrt 目录和其他不需要的文件
-          rsync -av --exclude='openwrt' \
-            --exclude='.git' \
-            --exclude='luci-app-mosdns' \
-            --exclude='luci-app-wechatpush' \
-            $GITHUB_WORKSPACE/ package/luci-app-adguardhome/
-
-      - name: Configure Build
-        run: |
-          cd $OPENWRT_PATH
-          cat > .config <<EOF
-          CONFIG_TARGET_x86=y
-          CONFIG_TARGET_x86_64=y
-          CONFIG_PACKAGE_luci-app-adguardhome=y
+          cat > apk-build/.PKGINFO <<EOF
+          pkgname = luci-app-adguardhome
+          pkgver = 1.8-12
+          pkgdesc = LuCI Support for AdGuard Home
+          url = https://github.com/JasonYANG170/luci-app-adguardhome
+          builddate = $(date +%s)
+          packager = GitHub Actions
+          size = $(du -sb apk-build | cut -f1)
+          arch = all
+          origin = luci-app-adguardhome
+          depend = wget-ssl
+          license = Apache-2.0
           EOF
-          make defconfig
-
-      - name: Build Tools
-        run: |
-          cd $OPENWRT_PATH
-          make tools/install -j$(nproc)
-
-      - name: Build Package Index
-        run: |
-          cd $OPENWRT_PATH
-          make package/index
-
-      - name: Build Package
-        run: |
-          cd $OPENWRT_PATH
-          make package/luci-app-adguardhome/compile V=s
-
-      - name: Collect Packages
-        run: |
-          cd $OPENWRT_PATH
-          mkdir -p $GITHUB_WORKSPACE/packages_ci
-          find bin/packages/ -name "luci-app-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
-          find bin/packages/ -name "luci-i18n-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
 
       - name: Create Archive
         run: |
-          cd $GITHUB_WORKSPACE
-          tar -czf luci-app-adguardhome-apk.tar.gz packages_ci/
+          cd apk-build
+          tar -czf ../luci-app-adguardhome_1.8-12_all.apk .
+          cd ..
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-adguardhome-apk
-          path: luci-app-adguardhome-apk.tar.gz
+          path: luci-app-adguardhome_1.8-12_all.apk
 
   release:
     name: Create Release
@@ -131,7 +94,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: release/*.tar.gz
+          files: release/*.apk
           draft: false
           prerelease: false
           generate_release_notes: true
