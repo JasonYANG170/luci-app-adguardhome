@@ -16,23 +16,8 @@ env:
 
 jobs:
   build:
-    name: Build APK for ${{ matrix.arch }}
+    name: Build APK Package
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch:
-          - aarch64_cortex-a53
-          - aarch64_cortex-a72
-          - aarch64_generic
-          - arm_cortex-a7
-          - arm_cortex-a9
-          - arm_cortex-a15_neon-vfpv4
-          - x86_64
-          - i386_pentium4
-          - mips_24kc
-          - mipsel_24kc
-          - riscv64_riscv64
 
     steps:
       - name: Checkout
@@ -73,33 +58,39 @@ jobs:
         run: |
           cd $OPENWRT_PATH
           cat > .config <<EOF
-          CONFIG_TARGET_${{ matrix.arch }}=y
+          CONFIG_TARGET_x86=y
+          CONFIG_TARGET_x86_64=y
           CONFIG_PACKAGE_luci-app-adguardhome=y
           EOF
           make defconfig
 
+      - name: Build Tools
+        run: |
+          cd $OPENWRT_PATH
+          make tools/install -j$(nproc)
+
       - name: Build Package
         run: |
           cd $OPENWRT_PATH
-          make package/luci-app-adguardhome/compile V=s -j$(nproc)
+          make package/luci-app-adguardhome/compile V=s
 
       - name: Collect Packages
         run: |
           cd $OPENWRT_PATH
           mkdir -p $GITHUB_WORKSPACE/packages_ci
-          find bin/packages/${{ matrix.arch }}/ -name "luci-app-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
-          find bin/packages/${{ matrix.arch }}/ -name "luci-i18n-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
+          find bin/packages/ -name "luci-app-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
+          find bin/packages/ -name "luci-i18n-adguardhome*.apk" -exec cp {} $GITHUB_WORKSPACE/packages_ci/ \;
 
       - name: Create Archive
         run: |
           cd $GITHUB_WORKSPACE
-          tar -czf SNAPSHOT-${{ matrix.arch }}.tar.gz packages_ci/
+          tar -czf luci-app-adguardhome-apk.tar.gz packages_ci/
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SNAPSHOT-${{ matrix.arch }}
-          path: SNAPSHOT-${{ matrix.arch }}.tar.gz
+          name: luci-app-adguardhome-apk
+          path: luci-app-adguardhome-apk.tar.gz
 
   release:
     name: Create Release
@@ -111,15 +102,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download All Artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-
-      - name: Prepare Release Files
-        run: |
-          mkdir -p release
-          find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+          name: luci-app-adguardhome-apk
+          path: release
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
