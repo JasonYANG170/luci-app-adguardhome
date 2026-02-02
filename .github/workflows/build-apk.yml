@@ -47,7 +47,8 @@ jobs:
 
       - name: Clone OpenWrt
         run: |
-          git clone https://git.openwrt.org/openwrt/openwrt.git -b ${{ env.OPENWRT_VERSION }} openwrt
+          git clone --depth=1 --single-branch --branch ${{ env.OPENWRT_VERSION }} \
+            https://github.com/openwrt/openwrt.git openwrt
           cd openwrt
           echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
 
