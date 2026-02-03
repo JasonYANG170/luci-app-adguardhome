@@ -21,7 +21,7 @@ jobs:
       - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gettext git rsync
+          sudo apt-get install -y build-essential gettext git rsync apk-tools
 
       - name: Create Package Structure
         run: |
@@ -63,10 +63,15 @@ jobs:
           license = Apache-2.0
           EOF
 
-      - name: Create Archive
+      - name: Create APK Package
         run: |
           cd apk-build
-          tar -czf ../luci-app-adguardhome_1.8-12_all.apk .
+          # Create data tarball
+          tar -czf control.tar.gz .PKGINFO
+          find . -type f ! -name '.PKGINFO' -print0 | tar -czf data.tar.gz --null -T -
+          
+          # Create APK v2 package
+          cat control.tar.gz data.tar.gz > ../luci-app-adguardhome_1.8-12_all.apk
           cd ..
 
       - name: Upload Artifact
